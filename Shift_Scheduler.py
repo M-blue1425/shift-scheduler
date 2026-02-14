@@ -175,9 +175,9 @@ def generate_overtime_recommendations(schedule_df, days_count):
             if current_shift == 'Pagi':
                 rekomendasi = ["Sore", "Malam"]
 
-            # Rule 2 & 5: Siang -> Malam atau Sore
-            elif current_shift == 'Siang':
-                rekomendasi = ["Sore", "Malam"]
+            # Rule 2 & 5: Sore -> Malam atau Sore
+            elif current_shift == 'Sore':
+                rekomendasi = ["Pagi", "Malam"]
 
             # Rule 4: Middle -> Pagi atau Sore
             elif current_shift == 'Middle':
@@ -186,6 +186,7 @@ def generate_overtime_recommendations(schedule_df, days_count):
             # Rule 3: Malam -> Pagi (Besok)
             elif current_shift == 'Malam':
                 rekomendasi = ["Pagi (H+1)"]
+
 
             # Jika Off/Cuti/X, tidak ada rekomendasi
             else:
