@@ -6,7 +6,7 @@ import math
 
 # === 1. KONFIGURASI HALAMAN ===
 st.set_page_config(page_title="Shift Scheduler Ultimate", layout="wide")
-st.title("HD ATMi Shifting Scheduler (Ultimate Rebuild)")
+st.title("HD ATMi Shifting Scheduler")
 
 # === 2. SIDEBAR INPUT & UPLOAD ===
 with st.sidebar:
@@ -21,16 +21,16 @@ with st.sidebar:
 
     num_days = st.slider("Jumlah Hari (Periode Bulan Ini)", min_value=7, max_value=31, value=31)
 
-    st.subheader("Dompet Kuota & Batas")
-    target_off_days = st.number_input("Target Libur (Off) per Karyawan", min_value=1, max_value=15, value=10)
+    st.subheader("Saldo Libur")
+    target_off_days = st.number_input("Hari Libur per Karyawan", min_value=1, max_value=15, value=10)
     target_work_days = num_days - target_off_days
 
     # --- FITUR BARU: SLIDER BATAS KERJA ---
-    max_consecutive_work = st.slider("Batas Maks. Kerja Beruntun", min_value=4, max_value=10, value=6)
+    max_consecutive_work = st.slider("Batas Maks. Kerja Karyawan", min_value=4, max_value=10, value=6)
     max_off_per_day = st.slider("Maksimal Karyawan Libur per Hari", min_value=2, max_value=10, value=5)
 
     st.success(
-        f"**Dompet Kuota Terkunci:**\n💼 Target Kerja: **{target_work_days} Hari**\n🏖️ Target Libur: **{target_off_days} Hari**\n⚠️ Wajib Libur setelah: **{max_consecutive_work} Hari Kerja**")
+        f"**Saldo Libur Terkunci:**\n💼 Target Kerja: **{target_work_days} Hari**\n🏖️ Target Libur: **{target_off_days} Hari**\n⚠️ Wajib Libur setelah: **{max_consecutive_work} Hari Kerja**")
 
     st.markdown("---")
     st.subheader("3. Request Libur & Cuti")
@@ -351,7 +351,7 @@ user_requests = parse_requests_flexible(request_input)
 initial_state = get_carry_over_state(uploaded_file, team_members)
 
 if st.button("Generate Schedule"):
-    with st.spinner("Menganalisis Algoritma Fatigue & Dompet Kuota..."):
+    with st.spinner("Menganalisis Algoritma Kelelahan Karyawan & Saldo Libur..."):
         # Parameter max_consec_work dimasukkan ke pemanggilan fungsi di bawah ini
         df = generate_schedule_balanced(team_members, num_days, user_requests, target_work_days, target_off_days,
                                         max_off_per_day, max_consecutive_work, initial_state)
@@ -362,7 +362,7 @@ if st.button("Generate Schedule"):
 
         if not over_limit_days.empty:
             st.warning(
-                f"⚠️ Peringatan: Ada hari yang liburnya melewati batas maksimal ({max_off_per_day} orang) karena intervensi Aturan Kelelahan / Safety.")
+                f"⚠️ Peringatan: Ada hari yang liburnya melewati batas maksimal ({max_off_per_day} orang) karena intervensi Aturan Kelelahan.")
 
             # --- TAMBAHAN: Menampilkan detail nama karyawan per hari ---
             for day in over_limit_days.index:
