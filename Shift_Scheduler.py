@@ -6,7 +6,7 @@ import math
 import plotly.express as px
 
 # === 0. KONFIGURASI HALAMAN UTAMA (HARUS PALING ATAS) ===
-st.set_page_config(page_title="Portal One-Stop Solution", layout="wide")
+st.set_page_config(page_title="omnira-atmi", layout="wide")
 
 
 # ==========================================
