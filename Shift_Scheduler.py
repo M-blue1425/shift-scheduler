@@ -336,8 +336,6 @@ def aplikasi_jadwal_shift():
 
 
 # ==========================================
-# 2. PROGRAM ANALISIS DATA ATM
-# ==========================================# ==========================================
 # 2. PROGRAM ANALISIS DATA ATM (OMNIRA-ATMI)
 # ==========================================
 def aplikasi_analisis_atm():
@@ -357,7 +355,6 @@ def aplikasi_analisis_atm():
         if uploaded_files:
             all_data = []
             for file in uploaded_files:
-                # Skip 2 baris awal untuk menyesuaikan format ekspor deals Qontak
                 if file.name.endswith('.csv'):
                     df_upload = pd.read_csv(file, skiprows=2)
                 else:
@@ -384,7 +381,6 @@ def aplikasi_analisis_atm():
         df['Hari'] = df['Tanggal Transaksi'].dt.day
         df['Periode 5 Harian'] = df['Hari'].apply(categorize_date)
         
-        # Ekstraksi Jam untuk Analisis Peak Hour
         df['Jam_H'] = pd.to_datetime(df['Jam Transaksi'], format='%H:%M:%S', errors='coerce').dt.hour
         def categorize_hour(h):
             if 0 <= h < 6: return "Dini Hari (00-06)"
@@ -397,16 +393,18 @@ def aplikasi_analisis_atm():
         if 'Size' in df.columns:
             df['Size'] = pd.to_numeric(df['Size'], errors='coerce').fillna(0)
 
-        # 3. Ekstraksi SLA (Days on stage Solved)
-        # Mengubah "100 days at this stage" menjadi angka 100
+        # 3. SLA (Days on stage Solved)
         if 'Days on stage Solved' in df.columns:
             df['SLA_Days'] = df['Days on stage Solved'].str.extract('(\d+)').astype(float).fillna(0)
 
-        # 4. Filter Kategori
+        # 4. Filter Kategori (DITAMBAHKAN UTLE)
         df['Kategori Laporan'] = 'Lainnya'
         df.loc[df['Jenis Pengaduan'].str.contains('Tarik Tunai', case=False, na=False), 'Kategori Laporan'] = 'Tarik Tunai'
         df.loc[df['Jenis Pengaduan'].str.contains('Tertelan', case=False, na=False), 'Kategori Laporan'] = 'ATM Tertelan'
-        df_filtered = df[df['Kategori Laporan'].isin(['Tarik Tunai', 'ATM Tertelan'])]
+        df.loc[df['Jenis Pengaduan'].str.contains('UTLE', case=False, na=False), 'Kategori Laporan'] = 'UTLE' # Tangkap UTLE
+        
+        # Filter hanya Tarik Tunai, ATM Tertelan, dan UTLE
+        df_filtered = df[df['Kategori Laporan'].isin(['Tarik Tunai', 'ATM Tertelan', 'UTLE'])]
 
         # --- B. TAMPILAN TAB ---
         tab1, tab2 = st.tabs(["📊 Analisis Per Bulan", "📈 Management Control Tower (Komparasi & BI)"])
@@ -492,10 +490,41 @@ def aplikasi_analisis_atm():
 
             st.divider()
 
-            # --- 5. TOP 10 ATM BERMASALAH ---
-            st.subheader("📟 Top 10 ID ATM Paling Sering Bermasalah (Red Zone)")
-            atm_df = df_filtered.groupby(['ID ATM', 'Bank']).size().reset_index(name='Total Keluhan').sort_values('Total Keluhan', ascending=False).head(10)
-            st.table(atm_df) # Gunakan table agar ID ATM terlihat jelas tanpa scrolling
+            # --- 5. TOP 10 ATM BERMASALAH (BREAKDOWN PIVOT BULANAN) ---
+            st.subheader("📟 Top 10 ID ATM Paling Sering Bermasalah (Breakdown Per Bulan)")
+            st.info("Tabel ini membongkar rincian masalah per bulan untuk 10 mesin ATM dengan kasus terbanyak (Tarik Tunai, Tertelan, & UTLE).")
+            
+            # 1. Cari 10 ATM paling bermasalah secara keseluruhan
+            top_atms = df_filtered.groupby(['ID ATM', 'Bank']).size().reset_index(name='Total Keseluruhan')
+            top_atms = top_atms.sort_values('Total Keseluruhan', ascending=False).head(10)
+            top_atm_ids = top_atms['ID ATM'].tolist()
+
+            # 2. Ambil data mentah hanya untuk ke-10 ATM tersebut
+            df_top10 = df_filtered[df_filtered['ID ATM'].isin(top_atm_ids)]
+
+            if not df_top10.empty:
+                # 3. Buat Pivot Table dinamis (Baris: ATM, Kolom: Bulan + Kategori, Nilai: Jumlah Kasus)
+                pivot_atm = pd.pivot_table(
+                    df_top10,
+                    index=['ID ATM', 'Bank'],
+                    columns=['Bulan', 'Kategori Laporan'],
+                    aggfunc='size',
+                    fill_value=0
+                )
+                
+                # 4. Merapikan nama kolom (Gabungkan Nama Bulan dan Kategori)
+                # Contoh: Kolom '2026-01' dan 'Tarik Tunai' menjadi '2026-01 (Tarik Tunai)'
+                pivot_atm.columns = [f"{col[0]} ({col[1]})" for col in pivot_atm.columns]
+                pivot_atm = pivot_atm.reset_index()
+
+                # 5. Gabungkan kembali dengan kolom Total Keseluruhan agar bisa diurutkan
+                pivot_atm = pivot_atm.merge(top_atms[['ID ATM', 'Total Keseluruhan']], on='ID ATM')
+                pivot_atm = pivot_atm.sort_values('Total Keseluruhan', ascending=False)
+
+                # Tampilkan sebagai dataframe agar bisa discroll ke kanan (karena kolomnya akan banyak jika bulannya banyak)
+                st.dataframe(pivot_atm, hide_index=True, use_container_width=True)
+            else:
+                st.warning("Belum ada data masalah ATM yang tercatat.")
 
 
 # ==========================================
