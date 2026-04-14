@@ -337,18 +337,16 @@ def aplikasi_jadwal_shift():
 
 # ==========================================
 # 2. PROGRAM ANALISIS DATA ATM
-# ==========================================
-# ==========================================
-# 2. PROGRAM ANALISIS DATA ATM
+# ==========================================# ==========================================
+# 2. PROGRAM ANALISIS DATA ATM (OMNIRA-ATMI)
 # ==========================================
 def aplikasi_analisis_atm():
     st.title("🏦 Dashboard Analisis Transaksi & ATM Tertelan")
-
-    # --- Inisialisasi Memori (Session State) ---
+    
     if "df_atm" not in st.session_state:
         st.session_state.df_atm = None
 
-    # --- 1. JIKA DATA BELUM ADA: TAMPILKAN MENU UPLOAD ---
+    # --- 1. MENU UPLOAD ---
     if st.session_state.df_atm is None:
         st.header("📂 Upload Data")
         st.write("Upload data bulan Januari, Februari, Maret, dst. sekaligus di bawah ini.")
@@ -359,107 +357,145 @@ def aplikasi_analisis_atm():
         if uploaded_files:
             all_data = []
             for file in uploaded_files:
+                # Skip 2 baris awal untuk menyesuaikan format ekspor deals Qontak
                 if file.name.endswith('.csv'):
                     df_upload = pd.read_csv(file, skiprows=2)
                 else:
                     df_upload = pd.read_excel(file, skiprows=2)
                 all_data.append(df_upload)
 
-            # Simpan data gabungan ke dalam "ingatan" (session state)
             st.session_state.df_atm = pd.concat(all_data, ignore_index=True)
-            st.rerun()  # Muat ulang halaman untuk menghilangkan kotak upload
+            st.rerun()
 
-    # --- 2. JIKA DATA SUDAH ADA: TAMPILKAN DASHBOARD ---
+    # --- 2. DASHBOARD UTAMA ---
     else:
-        # Tombol untuk reset jika user ingin ganti file
         if st.button("🔄 Upload Data Baru"):
             st.session_state.df_atm = None
             st.rerun()
 
         st.divider()
-
-        # Ambil data dari ingatan (session state)
         df = st.session_state.df_atm.copy()
 
-        # 2. PREPROCESSING TANGGAL
+        # --- A. PREPROCESSING DATA ---
+        # 1. Tanggal & Waktu
         df['Tanggal Transaksi'] = pd.to_datetime(df['Tanggal Transaksi'], format='%d/%m/%Y', errors='coerce')
         df = df.dropna(subset=['Tanggal Transaksi'])
         df['Bulan'] = df['Tanggal Transaksi'].dt.strftime('%Y-%m')
         df['Hari'] = df['Tanggal Transaksi'].dt.day
         df['Periode 5 Harian'] = df['Hari'].apply(categorize_date)
+        
+        # Ekstraksi Jam untuk Analisis Peak Hour
+        df['Jam_H'] = pd.to_datetime(df['Jam Transaksi'], format='%H:%M:%S', errors='coerce').dt.hour
+        def categorize_hour(h):
+            if 0 <= h < 6: return "Dini Hari (00-06)"
+            elif 6 <= h < 12: return "Pagi (06-12)"
+            elif 12 <= h < 18: return "Siang (12-18)"
+            else: return "Malam (18-00)"
+        df['Waktu Hari'] = df['Jam_H'].apply(categorize_hour)
 
-        # 3. KATEGORISASI PENGADUAN
+        # 2. Nominal Uang
+        if 'Size' in df.columns:
+            df['Size'] = pd.to_numeric(df['Size'], errors='coerce').fillna(0)
+
+        # 3. Ekstraksi SLA (Days on stage Solved)
+        # Mengubah "100 days at this stage" menjadi angka 100
+        if 'Days on stage Solved' in df.columns:
+            df['SLA_Days'] = df['Days on stage Solved'].str.extract('(\d+)').astype(float).fillna(0)
+
+        # 4. Filter Kategori
         df['Kategori Laporan'] = 'Lainnya'
-        df.loc[
-            df['Jenis Pengaduan'].str.contains('Tarik Tunai', case=False, na=False), 'Kategori Laporan'] = 'Tarik Tunai'
-        df.loc[
-            df['Jenis Pengaduan'].str.contains('Tertelan', case=False, na=False), 'Kategori Laporan'] = 'ATM Tertelan'
-
+        df.loc[df['Jenis Pengaduan'].str.contains('Tarik Tunai', case=False, na=False), 'Kategori Laporan'] = 'Tarik Tunai'
+        df.loc[df['Jenis Pengaduan'].str.contains('Tertelan', case=False, na=False), 'Kategori Laporan'] = 'ATM Tertelan'
         df_filtered = df[df['Kategori Laporan'].isin(['Tarik Tunai', 'ATM Tertelan'])]
 
-        # --- MEMBUAT TABULASI TAMPILAN ---
-        tab1, tab2 = st.tabs(["📊 Analisis Per Bulan", "📈 Komparasi Antar Bulan"])
+        # --- B. TAMPILAN TAB ---
+        tab1, tab2 = st.tabs(["📊 Analisis Per Bulan", "📈 Management Control Tower (Komparasi & BI)"])
 
-        # --- TAB 1: ANALISIS PER BULAN ---
         with tab1:
-            st.header("Analisis Komparasi 5-Harian per Bulan")
-            bulan_pilihan = st.selectbox("Pilih Bulan untuk Dilihat Detailnya:",
-                                         sorted(df['Bulan'].unique(), reverse=True))
-            df_bulan = df_filtered[df_filtered['Bulan'] == bulan_pilihan]
+            st.header("Analisis 5-Harian per Bulan")
+            bulan_pilih = st.selectbox("Pilih Bulan:", sorted(df['Bulan'].unique(), reverse=True))
+            df_m = df_filtered[df_filtered['Bulan'] == bulan_pilih]
 
-            if not df_bulan.empty:
-                df_grouped = df_bulan.groupby(['Periode 5 Harian', 'Kategori Laporan']).size().reset_index(
-                    name='Jumlah')
-                total_per_periode = df_grouped.groupby('Periode 5 Harian')['Jumlah'].transform('sum')
-                df_grouped['Persentase'] = (df_grouped['Jumlah'] / total_per_periode * 100).round(2)
+            if not df_m.empty:
+                df_g = df_m.groupby(['Periode 5 Harian', 'Kategori Laporan']).size().reset_index(name='Jumlah')
+                total_p = df_g.groupby('Periode 5 Harian')['Jumlah'].transform('sum')
+                df_g['Persentase'] = (df_g['Jumlah'] / total_p * 100).round(2)
 
-                fig = px.bar(
-                    df_grouped, x='Periode 5 Harian', y='Jumlah', color='Kategori Laporan',
-                    text='Persentase', barmode='group', title=f"Jumlah Laporan per 5 Hari ({bulan_pilihan})",
-                    category_orders={
-                        "Periode 5 Harian": ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]}
-                )
+                fig = px.bar(df_g, x='Periode 5 Harian', y='Jumlah', color='Kategori Laporan', text='Persentase', barmode='group',
+                             category_orders={"Periode 5 Harian": ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]})
                 fig.update_traces(texttemplate='<b>%{y}</b><br>(%{text}%)', textposition='outside')
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning("Tidak ada data Tarik Tunai atau ATM Tertelan di bulan ini.")
+                st.warning("Data tidak tersedia untuk bulan ini.")
 
-        # --- TAB 2: KOMPARASI ANTAR BULAN ---
         with tab2:
-            st.header("Komparasi Tren Keseluruhan Bulan (Per 5 Hari)")
-            trend_df = df_filtered.groupby(['Bulan', 'Periode 5 Harian', 'Kategori Laporan']).size().reset_index(
-                name='Jumlah')
-            periode_order = ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]
-            trend_df['Periode 5 Harian'] = pd.Categorical(trend_df['Periode 5 Harian'], categories=periode_order,
-                                                          ordered=True)
+            st.header("📈 Analisis Komprehensif Antar Bulan")
+            
+            # --- 1. TREN KRONOLOGIS ---
+            trend_df = df_filtered.groupby(['Bulan', 'Periode 5 Harian', 'Kategori Laporan']).size().reset_index(name='Jumlah')
+            p_order = ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]
+            trend_df['Periode 5 Harian'] = pd.Categorical(trend_df['Periode 5 Harian'], categories=p_order, ordered=True)
             trend_df = trend_df.sort_values(['Bulan', 'Periode 5 Harian'])
             trend_df['Timeline'] = trend_df['Bulan'] + " (" + trend_df['Periode 5 Harian'].astype(str) + ")"
 
-            fig_trend = px.line(
-                trend_df, x='Timeline', y='Jumlah', color='Kategori Laporan', markers=True, text='Jumlah',
-                title="Tren Fluktuasi Keluhan per 5 Hari (Semua Bulan Ter-upload)"
-            )
-            fig_trend.update_traces(textposition='top center')
-            fig_trend.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_trend, use_container_width=True)
+            fig_t = px.line(trend_df, x='Timeline', y='Jumlah', color='Kategori Laporan', markers=True, text='Jumlah', title="Tren Keluhan per 5 Hari")
+            fig_t.update_traces(textposition='top center')
+            st.plotly_chart(fig_t, use_container_width=True)
 
             st.divider()
-            st.subheader("🏆 Summary: Top 5 Bank Tertinggi (Akumulasi Seluruh Bulan)")
-            col1, col2 = st.columns(2)
 
-            with col1:
-                st.markdown("#### 🚨 Top 5 Bank: ATM Tertelan")
-                df_tertelan = df_filtered[df_filtered['Kategori Laporan'] == 'ATM Tertelan']
-                top5_tertelan = df_tertelan.groupby('Bank').size().reset_index(name='Jumlah Kasus').sort_values(
-                    'Jumlah Kasus', ascending=False).head(5)
-                st.dataframe(top5_tertelan, hide_index=True, use_container_width=True)
+            # --- 2. SUMMARY TOP 5 BANK (VOLUME & NOMINAL) ---
+            col_v1, col_v2 = st.columns(2)
+            with col_v1:
+                st.subheader("🚨 Top 5 Bank: Kasus Tertelan")
+                st.dataframe(df_filtered[df_filtered['Kategori Laporan'] == 'ATM Tertelan'].groupby('Bank').size().reset_index(name='Kasus').sort_values('Kasus', ascending=False).head(5), hide_index=True, use_container_width=True)
+            with col_v2:
+                st.subheader("💸 Top 5 Bank: Kasus Tarik Tunai")
+                st.dataframe(df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai'].groupby('Bank').size().reset_index(name='Kasus').sort_values('Kasus', ascending=False).head(5), hide_index=True, use_container_width=True)
 
-            with col2:
-                st.markdown("#### 💸 Top 5 Bank: Keluhan Tarik Tunai")
-                df_tarik = df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai']
-                top5_tarik = df_tarik.groupby('Bank').size().reset_index(name='Jumlah Kasus').sort_values(
-                    'Jumlah Kasus', ascending=False).head(5)
-                st.dataframe(top5_tarik, hide_index=True, use_container_width=True)
+            # FINANCIAL IMPACT
+            st.subheader("💰 Financial Impact: Total Nominal Sengketa")
+            df_fin = df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai'].groupby('Bank')['Size'].sum().reset_index(name='Total (Rp)').sort_values('Total (Rp)', ascending=False)
+            fig_f = px.bar(df_fin.head(10), x='Bank', y='Total (Rp)', color='Total (Rp)', color_continuous_scale='Reds', text_auto='.2s')
+            st.plotly_chart(fig_f, use_container_width=True)
+
+            st.divider()
+
+            # --- 3. ANALISIS PEAK HOUR & CHANNEL ---
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                st.subheader("🕒 Analisis Jam Sibuk (Peak Hour)")
+                hour_df = df_filtered.groupby('Waktu Hari').size().reset_index(name='Jumlah')
+                fig_h = px.bar(hour_df, x='Waktu Hari', y='Jumlah', color='Waktu Hari', title="Kapan Nasabah Paling Banyak Komplain?")
+                st.plotly_chart(fig_h, use_container_width=True)
+            with col_p2:
+                st.subheader("📱 Kanal Laporan (Source)")
+                src_df = df_filtered.groupby('Source').size().reset_index(name='Jumlah')
+                fig_s = px.pie(src_df, values='Jumlah', names='Source', hole=0.4, title="Dari Mana Laporan Masuk?")
+                st.plotly_chart(fig_s, use_container_width=True)
+
+            st.divider()
+
+            # --- 4. ANALISIS HASIL & SLA ---
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                st.subheader("✅ Distribusi Hasil Analisis")
+                res_df = df_filtered.groupby('Hasil Analis').size().reset_index(name='Jumlah').sort_values('Jumlah', ascending=False).head(8)
+                fig_res = px.pie(res_df, values='Jumlah', names='Hasil Analis', title="Hasil Akhir Penanganan Tiket")
+                st.plotly_chart(fig_res, use_container_width=True)
+            with col_a2:
+                st.subheader("⏱️ Performa SLA (Rata-rata Hari Solusi)")
+                if 'SLA_Days' in df.columns:
+                    sla_df = df_filtered.groupby('Bulan')['SLA_Days'].mean().reset_index(name='Rata-rata Hari')
+                    fig_sla = px.line(sla_df, x='Bulan', y='Rata-rata Hari', markers=True, title="Trend Kecepatan Penyelesaian Kasus")
+                    st.plotly_chart(fig_sla, use_container_width=True)
+
+            st.divider()
+
+            # --- 5. TOP 10 ATM BERMASALAH ---
+            st.subheader("📟 Top 10 ID ATM Paling Sering Bermasalah (Red Zone)")
+            atm_df = df_filtered.groupby(['ID ATM', 'Bank']).size().reset_index(name='Total Keluhan').sort_values('Total Keluhan', ascending=False).head(10)
+            st.table(atm_df) # Gunakan table agar ID ATM terlihat jelas tanpa scrolling
 
 
 # ==========================================
