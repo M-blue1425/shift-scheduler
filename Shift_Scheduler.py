@@ -523,3 +523,38 @@ def aplikasi_analisis_atm():
                     aggfunc='size',
                     fill_value=0
                 )
+                
+                pivot_atm.columns = [f"{col[0]} ({col[1]})" for col in pivot_atm.columns]
+                pivot_atm = pivot_atm.reset_index()
+
+                pivot_atm = pivot_atm.merge(top_atms[['ID ATM', 'Total Keseluruhan']], on='ID ATM')
+                pivot_atm = pivot_atm.sort_values('Total Keseluruhan', ascending=False)
+
+                st.dataframe(pivot_atm, hide_index=True, use_container_width=True)
+            else:
+                st.warning("Belum ada data masalah ATM yang tercatat.")
+
+
+# ==========================================
+# 3. MENU NAVIGASI UTAMA (SIDEBAR)
+# ==========================================
+def main():
+    st.sidebar.title("🧭 Navigasi Utama")
+    st.sidebar.markdown("Silakan pilih aplikasi yang ingin digunakan:")
+
+    pilihan_menu = st.sidebar.radio(
+        "Menu:",
+        ("🗓️ Jadwal Shift", "🏦 Analisis ATM")
+    )
+
+    st.sidebar.divider()
+    st.sidebar.info("Aplikasi ini merupakan One-Stop Solution untuk mempermudah operasional harian Anda.")
+
+    if pilihan_menu == "🗓️ Jadwal Shift":
+        aplikasi_jadwal_shift()
+    elif pilihan_menu == "🏦 Analisis ATM":
+        aplikasi_analisis_atm()
+
+
+if __name__ == "__main__":
+    main()
