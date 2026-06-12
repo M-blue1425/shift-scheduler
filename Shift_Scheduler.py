@@ -58,11 +58,11 @@ def parse_requests_flexible(request_text):
     return requests
 
 
-def generate_schedule_balanced(members, num_days, requests, target_work, target_off, max_off_daily, max_consec_work,
-                               initial_state):
+def generate_schedule_balanced(members, num_days, requests, target_work, target_off, max_off_daily, max_consec_work, initial_state):
     special_team = ["Felix", "Adi", "Alfyn"]
-    stats = {m: {'shifts': [], 'work_count': 0, 'off_count': 0, 'cuti_count': 0, 'consecutive_work': initial_state[m][
-        'consecutive_work'] if initial_state and m in initial_state else 0, 'malam_count': 0,
+    stats = {m: {'shifts': [], 'work_count': 0, 'off_count': 0, 'cuti_count': 0, 
+                 'consecutive_work': initial_state[m]['consecutive_work'] if initial_state and m in initial_state else 0, 
+                 'malam_count': 0,
                  'last_shift': initial_state[m]['last_shift'] if initial_state and m in initial_state else None,
                  'owe_off': 0, 'restrict_pagi': False} for m in members}
 
@@ -109,16 +109,15 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                 stats[m]['restrict_pagi'] = (reason_off == "Post-Malam")
                 unassigned.remove(m)
 
-        # --- PERUBAHAN: TIM SPESIAL HANYA PAGI / SORE ---
+        # Tim Spesial: Hanya Pagi / Sore
         for m in unassigned[:]:
             if m in special_team:
                 last_s = stats[m]['last_shift']
-                # Logika Flow: Habis Sore dilarang Pagi
                 if stats[m]['restrict_pagi'] or last_s == 'Sore':
                     chosen = 'Sore'
                 elif last_s == 'Pagi':
-                    chosen = 'Sore' # Flow natural Pagi ke Sore
-                else: # Jika kemarin Off atau hari pertama
+                    chosen = 'Sore'
+                else:
                     chosen = 'Pagi'
                 
                 stats[m]['shifts'].append(chosen)
@@ -128,12 +127,18 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                 stats[m]['restrict_pagi'] = False
                 unassigned.remove(m)
 
-        # Tim Reguler untuk Malam (Tim Spesial tetap dikecualikan dari Malam)
+        # Tim Reguler untuk Malam
         eligible_malam = [m for m in unassigned if m not in special_team]
-        eligible_malam.sort(key=lambda emp: (stats[emp]['malam_count'],
-                                             1 if stats[emp]['last_shift'] == 'Sore' else 2 if stats[emp][
-                                                                                                   'last_shift'] == 'Pagi' else 3 if
-                                             stats[emp]['last_shift'] is None else 4, stats[emp]['work_count']))
+        
+        # Sistem skor pembantu agar lambda sort tidak error/panjang
+        def get_malam_score(emp):
+            ls = stats[emp]['last_shift']
+            if ls == 'Sore': return 1
+            if ls == 'Pagi': return 2
+            if ls is None: return 3
+            return 4
+
+        eligible_malam.sort(key=lambda emp: (stats[emp]['malam_count'], get_malam_score(emp), stats[emp]['work_count']))
         for m in eligible_malam[:2]:
             stats[m]['shifts'].append('Malam')
             stats[m]['last_shift'] = 'Malam'
@@ -158,10 +163,15 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
 
         if today_offs < max_off_daily:
             eligible_for_off = [m for m in unassigned if stats[m]['off_count'] < target_off]
-            eligible_for_off.sort(key=lambda emp: (-stats[emp]['consecutive_work'],
-                                                   1 if stats[emp]['last_shift'] == 'Sore' else 2 if stats[emp][
-                                                                                                         'last_shift'] == 'Pagi' else 3 if
-                                                   stats[emp]['last_shift'] is None else 4))
+            
+            def get_off_score(emp):
+                ls = stats[emp]['last_shift']
+                if ls == 'Sore': return 1
+                if ls == 'Pagi': return 2
+                if ls is None: return 3
+                return 4
+
+            eligible_for_off.sort(key=lambda emp: (-stats[emp]['consecutive_work'], get_off_score(emp)))
             for m in eligible_for_off:
                 if today_offs >= max_off_daily: break
                 stats[m]['shifts'].append('Off')
@@ -174,15 +184,20 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
         unassigned_reguler = [m for m in unassigned]
         if unassigned_reguler:
             target_pagi = math.ceil(len(unassigned_reguler) / 2)
-            unassigned_reguler.sort(
-                key=lambda emp: 99 if stats[emp]['restrict_pagi'] or stats[emp]['last_shift'] == 'Sore' else 1 if
-                stats[emp]['last_shift'] == 'Off' else 2 if stats[emp]['last_shift'] is None else 3 if stats[emp][
-                                                                                                           'last_shift'] == 'Pagi' else 4)
+            
+            def get_pagi_priority(emp):
+                ls = stats[emp]['last_shift']
+                if stats[emp]['restrict_pagi'] or ls == 'Sore': return 99
+                if ls == 'Off': return 1
+                if ls is None: return 2
+                if ls == 'Pagi': return 3
+                return 4
+
+            unassigned_reguler.sort(key=get_pagi_priority)
             assigned_pagi_count = 0
             for m in unassigned_reguler: stats[m]['temp_choice'] = 'Sore'
             for m in unassigned_reguler:
-                if assigned_pagi_count < target_pagi and not stats[m]['restrict_pagi'] and stats[m][
-                    'last_shift'] != 'Sore':
+                if assigned_pagi_count < target_pagi and not stats[m]['restrict_pagi'] and stats[m]['last_shift'] != 'Sore':
                     stats[m]['temp_choice'] = 'Pagi'
                     assigned_pagi_count += 1
             if assigned_pagi_count == 0 and len(unassigned_reguler) > 0:
@@ -256,7 +271,6 @@ def color_coding(val):
 def aplikasi_jadwal_shift():
     st.title("🗓️ HD ATMi Shifting Scheduler Ultimate")
 
-    # --- UI DI TENGAH (Menggunakan kolom agar tidak makan tempat) ---
     st.write("Silakan lengkapi form di bawah ini untuk membuat jadwal shift bulan ini.")
 
     col1, col2 = st.columns(2)
@@ -295,16 +309,16 @@ def aplikasi_jadwal_shift():
         initial_state = get_carry_over_state(uploaded_file, team_members)
 
         with st.spinner("Menganalisis Algoritma Kelelahan Karyawan & Saldo Libur..."):
-            # FIX: Menyinkronkan 8 argumen sesuai urutan definisi fungsi asli
+            # FIX FINAL: Menggunakan urutan Positional Arguments murni yang 100% presisi
             df = generate_schedule_balanced(
-                members=team_members, 
-                num_days=num_days, 
-                requests=user_requests, 
-                target_work=target_work_days, 
-                target_off=target_off_days, 
-                max_off_daily=max_off_per_day, 
-                max_consec_work=max_consecutive_work, 
-                initial_state=initial_state
+                team_members, 
+                num_days, 
+                user_requests, 
+                target_work_days, 
+                target_off_days,
+                max_off_per_day, 
+                max_consecutive_work, 
+                initial_state
             )
 
             st.divider()
@@ -360,7 +374,6 @@ def aplikasi_analisis_atm():
     if "df_atm" not in st.session_state:
         st.session_state.df_atm = None
 
-    # --- 1. MENU UPLOAD ---
     if st.session_state.df_atm is None:
         st.header("📂 Upload Data")
         st.write("Upload data bulan Januari, Februari, Maret, dst. sekaligus di bawah ini.")
@@ -380,7 +393,6 @@ def aplikasi_analisis_atm():
             st.session_state.df_atm = pd.concat(all_data, ignore_index=True)
             st.rerun()
 
-    # --- 2. DASHBOARD UTAMA ---
     else:
         if st.button("🔄 Upload Data Baru"):
             st.session_state.df_atm = None
@@ -389,8 +401,6 @@ def aplikasi_analisis_atm():
         st.divider()
         df = st.session_state.df_atm.copy()
 
-        # --- A. PREPROCESSING DATA ---
-        # 1. Tanggal & Waktu
         df['Tanggal Transaksi'] = pd.to_datetime(df['Tanggal Transaksi'], format='%d/%m/%Y', errors='coerce')
         df = df.dropna(subset=['Tanggal Transaksi'])
         df['Bulan'] = df['Tanggal Transaksi'].dt.strftime('%Y-%m')
@@ -405,24 +415,19 @@ def aplikasi_analisis_atm():
             else: return "Malam (18-00)"
         df['Waktu Hari'] = df['Jam_H'].apply(categorize_hour)
 
-        # 2. Nominal Uang
         if 'Size' in df.columns:
             df['Size'] = pd.to_numeric(df['Size'], errors='coerce').fillna(0)
 
-        # 3. SLA (Days on stage Solved)
         if 'Days on stage Solved' in df.columns:
             df['SLA_Days'] = df['Days on stage Solved'].str.extract('(\d+)').astype(float).fillna(0)
 
-        # 4. Filter Kategori (DITAMBAHKAN UTLE)
         df['Kategori Laporan'] = 'Lainnya'
         df.loc[df['Jenis Pengaduan'].str.contains('Tarik Tunai', case=False, na=False), 'Kategori Laporan'] = 'Tarik Tunai'
         df.loc[df['Jenis Pengaduan'].str.contains('Tertelan', case=False, na=False), 'Kategori Laporan'] = 'ATM Tertelan'
-        df.loc[df['Jenis Pengaduan'].str.contains('UTLE', case=False, na=False), 'Kategori Laporan'] = 'UTLE' # Tangkap UTLE
+        df.loc[df['Jenis Pengaduan'].str.contains('UTLE', case=False, na=False), 'Kategori Laporan'] = 'UTLE'
         
-        # Filter hanya Tarik Tunai, ATM Tertelan, dan UTLE
         df_filtered = df[df['Kategori Laporan'].isin(['Tarik Tunai', 'ATM Tertelan', 'UTLE'])]
 
-        # --- B. TAMPILAN TAB ---
         tab1, tab2 = st.tabs(["📊 Analisis Per Bulan", "📈 Management Control Tower (Komparasi & BI)"])
 
         with tab1:
@@ -445,7 +450,6 @@ def aplikasi_analisis_atm():
         with tab2:
             st.header("📈 Analisis Komprehensif Antar Bulan")
             
-            # --- 1. TREN KRONOLOGIS ---
             trend_df = df_filtered.groupby(['Bulan', 'Periode 5 Harian', 'Kategori Laporan']).size().reset_index(name='Jumlah')
             p_order = ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]
             trend_df['Periode 5 Harian'] = pd.Categorical(trend_df['Periode 5 Harian'], categories=p_order, ordered=True)
@@ -458,7 +462,6 @@ def aplikasi_analisis_atm():
 
             st.divider()
 
-            # --- 2. SUMMARY TOP 5 BANK (VOLUME & NOMINAL) ---
             col_v1, col_v2 = st.columns(2)
             with col_v1:
                 st.subheader("🚨 Top 5 Bank: Kasus Tertelan")
@@ -467,7 +470,6 @@ def aplikasi_analisis_atm():
                 st.subheader("💸 Top 5 Bank: Kasus Tarik Tunai")
                 st.dataframe(df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai'].groupby('Bank').size().reset_index(name='Kasus').sort_values('Kasus', ascending=False).head(5), hide_index=True, use_container_width=True)
 
-            # FINANCIAL IMPACT
             st.subheader("💰 Financial Impact: Total Nominal Sengketa")
             df_fin = df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai'].groupby('Bank')['Size'].sum().reset_index(name='Total (Rp)').sort_values('Total (Rp)', ascending=False)
             fig_f = px.bar(df_fin.head(10), x='Bank', y='Total (Rp)', color='Total (Rp)', color_continuous_scale='Reds', text_auto='.2s')
@@ -475,7 +477,6 @@ def aplikasi_analisis_atm():
 
             st.divider()
 
-            # --- 3. ANALISIS PEAK HOUR & CHANNEL ---
             col_p1, col_p2 = st.columns(2)
             with col_p1:
                 st.subheader("🕒 Analisis Jam Sibuk (Peak Hour)")
@@ -490,7 +491,6 @@ def aplikasi_analisis_atm():
 
             st.divider()
 
-            # --- 4. ANALISIS HASIL & SLA ---
             col_a1, col_a2 = st.columns(2)
             with col_a1:
                 st.subheader("✅ Distribusi Hasil Analisis")
@@ -506,20 +506,16 @@ def aplikasi_analisis_atm():
 
             st.divider()
 
-            # --- 5. TOP 10 ATM BERMASALAH (BREAKDOWN PIVOT BULANAN) ---
             st.subheader("📟 Top 10 ID ATM Paling Sering Bermasalah (Breakdown Per Bulan)")
             st.info("Tabel ini membongkar rincian masalah per bulan untuk 10 mesin ATM dengan kasus terbanyak (Tarik Tunai, Tertelan, & UTLE).")
             
-            # 1. Cari 10 ATM paling bermasalah secara keseluruhan
             top_atms = df_filtered.groupby(['ID ATM', 'Bank']).size().reset_index(name='Total Keseluruhan')
             top_atms = top_atms.sort_values('Total Keseluruhan', ascending=False).head(10)
             top_atm_ids = top_atms['ID ATM'].tolist()
 
-            # 2. Ambil data mentah hanya untuk ke-10 ATM tersebut
             df_top10 = df_filtered[df_filtered['ID ATM'].isin(top_atm_ids)]
 
             if not df_top10.empty:
-                # 3. Buat Pivot Table dinamis (Baris: ATM, Kolom: Bulan + Kategori, Nilai: Jumlah Kasus)
                 pivot_atm = pd.pivot_table(
                     df_top10,
                     index=['ID ATM', 'Bank'],
@@ -527,42 +523,3 @@ def aplikasi_analisis_atm():
                     aggfunc='size',
                     fill_value=0
                 )
-                
-                # 4. Merapikan nama kolom (Gabungkan Nama Bulan dan Kategori)
-                # Contoh: Kolom '2026-01' dan 'Tarik Tunai' menjadi '2026-01 (Tarik Tunai)'
-                pivot_atm.columns = [f"{col[0]} ({col[1]})" for col in pivot_atm.columns]
-                pivot_atm = pivot_atm.reset_index()
-
-                # 5. Gabungkan kembali dengan kolom Total Keseluruhan agar bisa diurutkan
-                pivot_atm = pivot_atm.merge(top_atms[['ID ATM', 'Total Keseluruhan']], on='ID ATM')
-                pivot_atm = pivot_atm.sort_values('Total Keseluruhan', ascending=False)
-
-                # Tampilkan sebagai dataframe agar bisa discroll ke kanan (karena kolomnya akan banyak jika bulannya banyak)
-                st.dataframe(pivot_atm, hide_index=True, use_container_width=True)
-            else:
-                st.warning("Belum ada data masalah ATM yang tercatat.")
-
-
-# ==========================================
-# 3. MENU NAVIGASI UTAMA (SIDEBAR)
-# ==========================================
-def main():
-    st.sidebar.title("🧭 Navigasi Utama")
-    st.sidebar.markdown("Silakan pilih aplikasi yang ingin digunakan:")
-
-    pilihan_menu = st.sidebar.radio(
-        "Menu:",
-        ("🗓️ Jadwal Shift", "🏦 Analisis ATM")
-    )
-
-    st.sidebar.divider()
-    st.sidebar.info("Aplikasi ini merupakan One-Stop Solution untuk mempermudah operasional harian Anda.")
-
-    if pilihan_menu == "🗓️ Jadwal Shift":
-        aplikasi_jadwal_shift()
-    elif pilihan_menu == "🏦 Analisis ATM":
-        aplikasi_analisis_atm()
-
-
-if __name__ == "__main__":
-    main()
