@@ -10,16 +10,8 @@ st.set_page_config(page_title="omnira-atmi", layout="wide")
 
 
 # ==========================================
-# FUNGSI PEMBANTU VERSI (VERSION-SAFE HELPERS)
+# FUNGSI PEMBANTU (HELPER FUNCTIONS)
 # ==========================================
-def pemicu_rerun():
-    """Fungsi pembantu agar aman dijalankan di Streamlit versi lama maupun baru"""
-    if hasattr(st, 'rerun'):
-        st.rerun()
-    else:
-        st.experimental_rerun()
-
-
 def get_carry_over_state(file_upload, members):
     if file_upload is None: return None
     try:
@@ -138,6 +130,7 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
         # Tim Reguler untuk Malam
         eligible_malam = [m for m in unassigned if m not in special_team]
         
+        # Sistem skor pembantu agar lambda sort tidak error/panjang
         def get_malam_score(emp):
             ls = stats[emp]['last_shift']
             if ls == 'Sore': return 1
@@ -316,6 +309,7 @@ def aplikasi_jadwal_shift():
         initial_state = get_carry_over_state(uploaded_file, team_members)
 
         with st.spinner("Menganalisis Algoritma Kelelahan Karyawan & Saldo Libur..."):
+            # FIX FINAL: Menggunakan urutan Positional Arguments murni yang 100% presisi
             df = generate_schedule_balanced(
                 team_members, 
                 num_days, 
@@ -357,12 +351,7 @@ def aplikasi_jadwal_shift():
             df_lembur = generate_overtime_recommendations(df, num_days)
 
             st.subheader("📅 Jadwal Utama")
-            
-            # FIX: Deteksi otomatis apakah versi Pandas Anda mendukung .map() atau .applymap()
-            if hasattr(df.style, 'map'):
-                st.dataframe(df.style.map(color_coding), use_container_width=True)
-            else:
-                st.dataframe(df.style.applymap(color_coding), use_container_width=True)
+            st.dataframe(df.style.applymap(color_coding), use_container_width=True)
 
             st.subheader("💡 Rekomendasi Lembur (Overtime)")
             st.dataframe(df_lembur, use_container_width=True)
@@ -402,12 +391,12 @@ def aplikasi_analisis_atm():
                 all_data.append(df_upload)
 
             st.session_state.df_atm = pd.concat(all_data, ignore_index=True)
-            pemicu_rerun()  # FIX: menggunakan wrapper dinamis
+            st.rerun()
 
     else:
         if st.button("🔄 Upload Data Baru"):
             st.session_state.df_atm = None
-            pemicu_rerun()  # FIX: menggunakan wrapper dinamis
+            st.rerun()
 
         st.divider()
         df = st.session_state.df_atm.copy()
@@ -452,4 +441,120 @@ def aplikasi_analisis_atm():
                 df_g['Persentase'] = (df_g['Jumlah'] / total_p * 100).round(2)
 
                 fig = px.bar(df_g, x='Periode 5 Harian', y='Jumlah', color='Kategori Laporan', text='Persentase', barmode='group',
-                             category_orders={"Periode 5 Harian":
+                             category_orders={"Periode 5 Harian": ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]})
+                fig.update_traces(texttemplate='<b>%{y}</b><br>(%{text}%)', textposition='outside')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Data tidak tersedia untuk bulan ini.")
+
+        with tab2:
+            st.header("📈 Analisis Komprehensif Antar Bulan")
+            
+            trend_df = df_filtered.groupby(['Bulan', 'Periode 5 Harian', 'Kategori Laporan']).size().reset_index(name='Jumlah')
+            p_order = ["Tgl 1-5", "Tgl 6-10", "Tgl 11-15", "Tgl 16-20", "Tgl 21-25", "Tgl 26-31"]
+            trend_df['Periode 5 Harian'] = pd.Categorical(trend_df['Periode 5 Harian'], categories=p_order, ordered=True)
+            trend_df = trend_df.sort_values(['Bulan', 'Periode 5 Harian'])
+            trend_df['Timeline'] = trend_df['Bulan'] + " (" + trend_df['Periode 5 Harian'].astype(str) + ")"
+
+            fig_t = px.line(trend_df, x='Timeline', y='Jumlah', color='Kategori Laporan', markers=True, text='Jumlah', title="Tren Keluhan per 5 Hari")
+            fig_t.update_traces(textposition='top center')
+            st.plotly_chart(fig_t, use_container_width=True)
+
+            st.divider()
+
+            col_v1, col_v2 = st.columns(2)
+            with col_v1:
+                st.subheader("🚨 Top 5 Bank: Kasus Tertelan")
+                st.dataframe(df_filtered[df_filtered['Kategori Laporan'] == 'ATM Tertelan'].groupby('Bank').size().reset_index(name='Kasus').sort_values('Kasus', ascending=False).head(5), hide_index=True, use_container_width=True)
+            with col_v2:
+                st.subheader("💸 Top 5 Bank: Kasus Tarik Tunai")
+                st.dataframe(df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai'].groupby('Bank').size().reset_index(name='Kasus').sort_values('Kasus', ascending=False).head(5), hide_index=True, use_container_width=True)
+
+            st.subheader("💰 Financial Impact: Total Nominal Sengketa")
+            df_fin = df_filtered[df_filtered['Kategori Laporan'] == 'Tarik Tunai'].groupby('Bank')['Size'].sum().reset_index(name='Total (Rp)').sort_values('Total (Rp)', ascending=False)
+            fig_f = px.bar(df_fin.head(10), x='Bank', y='Total (Rp)', color='Total (Rp)', color_continuous_scale='Reds', text_auto='.2s')
+            st.plotly_chart(fig_f, use_container_width=True)
+
+            st.divider()
+
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                st.subheader("🕒 Analisis Jam Sibuk (Peak Hour)")
+                hour_df = df_filtered.groupby('Waktu Hari').size().reset_index(name='Jumlah')
+                fig_h = px.bar(hour_df, x='Waktu Hari', y='Jumlah', color='Waktu Hari', title="Kapan Nasabah Paling Banyak Komplain?")
+                st.plotly_chart(fig_h, use_container_width=True)
+            with col_p2:
+                st.subheader("📱 Kanal Laporan (Source)")
+                src_df = df_filtered.groupby('Source').size().reset_index(name='Jumlah')
+                fig_s = px.pie(src_df, values='Jumlah', names='Source', hole=0.4, title="Dari Mana Laporan Masuk?")
+                st.plotly_chart(fig_s, use_container_width=True)
+
+            st.divider()
+
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                st.subheader("✅ Distribusi Hasil Analisis")
+                res_df = df_filtered.groupby('Hasil Analis').size().reset_index(name='Jumlah').sort_values('Jumlah', ascending=False).head(8)
+                fig_res = px.pie(res_df, values='Jumlah', names='Hasil Analis', title="Hasil Akhir Penanganan Tiket")
+                st.plotly_chart(fig_res, use_container_width=True)
+            with col_a2:
+                st.subheader("⏱️ Performa SLA (Rata-rata Hari Solusi)")
+                if 'SLA_Days' in df.columns:
+                    sla_df = df_filtered.groupby('Bulan')['SLA_Days'].mean().reset_index(name='Rata-rata Hari')
+                    fig_sla = px.line(sla_df, x='Bulan', y='Rata-rata Hari', markers=True, title="Trend Kecepatan Penyelesaian Kasus")
+                    st.plotly_chart(fig_sla, use_container_width=True)
+
+            st.divider()
+
+            st.subheader("📟 Top 10 ID ATM Paling Sering Bermasalah (Breakdown Per Bulan)")
+            st.info("Tabel ini membongkar rincian masalah per bulan untuk 10 mesin ATM dengan kasus terbanyak (Tarik Tunai, Tertelan, & UTLE).")
+            
+            top_atms = df_filtered.groupby(['ID ATM', 'Bank']).size().reset_index(name='Total Keseluruhan')
+            top_atms = top_atms.sort_values('Total Keseluruhan', ascending=False).head(10)
+            top_atm_ids = top_atms['ID ATM'].tolist()
+
+            df_top10 = df_filtered[df_filtered['ID ATM'].isin(top_atm_ids)]
+
+            if not df_top10.empty:
+                pivot_atm = pd.pivot_table(
+                    df_top10,
+                    index=['ID ATM', 'Bank'],
+                    columns=['Bulan', 'Kategori Laporan'],
+                    aggfunc='size',
+                    fill_value=0
+                )
+                
+                pivot_atm.columns = [f"{col[0]} ({col[1]})" for col in pivot_atm.columns]
+                pivot_atm = pivot_atm.reset_index()
+
+                pivot_atm = pivot_atm.merge(top_atms[['ID ATM', 'Total Keseluruhan']], on='ID ATM')
+                pivot_atm = pivot_atm.sort_values('Total Keseluruhan', ascending=False)
+
+                st.dataframe(pivot_atm, hide_index=True, use_container_width=True)
+            else:
+                st.warning("Belum ada data masalah ATM yang tercatat.")
+
+
+# ==========================================
+# 3. MENU NAVIGASI UTAMA (SIDEBAR)
+# ==========================================
+def main():
+    st.sidebar.title("🧭 Navigasi Utama")
+    st.sidebar.markdown("Silakan pilih aplikasi yang ingin digunakan:")
+
+    pilihan_menu = st.sidebar.radio(
+        "Menu:",
+        ("🗓️ Jadwal Shift", "🏦 Analisis ATM")
+    )
+
+    st.sidebar.divider()
+    st.sidebar.info("Aplikasi ini merupakan One-Stop Solution untuk mempermudah operasional harian Anda.")
+
+    if pilihan_menu == "🗓️ Jadwal Shift":
+        aplikasi_jadwal_shift()
+    elif pilihan_menu == "🏦 Analisis ATM":
+        aplikasi_analisis_atm()
+
+
+if __name__ == "__main__":
+    main()
