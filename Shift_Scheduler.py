@@ -8,6 +8,7 @@ import plotly.express as px
 # === 0. KONFIGURASI HALAMAN UTAMA (HARUS PALING ATAS) ===
 st.set_page_config(page_title="omnira-atmi", layout="wide")
 
+
 # ==========================================
 # FUNGSI PEMBANTU VERSI (VERSION-SAFE HELPERS)
 # ==========================================
@@ -16,6 +17,7 @@ def pemicu_rerun():
         st.rerun()
     else:
         st.experimental_rerun()
+
 
 def get_carry_over_state(file_upload, members):
     if file_upload is None: return None
@@ -43,6 +45,7 @@ def get_carry_over_state(file_upload, members):
         st.error(f"Gagal membaca file riwayat: {e}")
         return None
 
+
 def parse_requests_flexible(request_text):
     requests = {}
     if not request_text.strip(): return requests
@@ -61,6 +64,7 @@ def parse_requests_flexible(request_text):
             continue
     return requests
 
+
 def generate_schedule_balanced(members, num_days, requests, target_work, target_off, max_off_daily, max_consec_work, initial_state):
     special_team = ["Felix", "Adi", "Alfyn"]
     stats = {m: {'shifts': [], 'work_count': 0, 'off_count': 0, 'cuti_count': 0, 
@@ -74,6 +78,13 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
         unassigned = members.copy()
         today_offs = 0
 
+        # --- OPTIMASI BARU: HITUNG KUOTA LIBUR IDEAL HARIAN (LOAD BALANCER) ---
+        days_left = num_days - day_idx
+        total_offs_still_needed = sum(max(0, target_off - stats[m]['off_count']) for m in members)
+        ideal_offs_today = math.ceil(total_offs_still_needed / days_left) if days_left > 0 else 0
+        ideal_offs_today = min(ideal_offs_today, max_off_daily) # Batasi sesuai slider maksimal harian
+
+        # Langkah 1: Request Libur & Cuti Karyawan
         for m in members:
             if (m, day_idx) in requests:
                 req = requests[(m, day_idx)]
@@ -90,6 +101,7 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                     stats[m]['restrict_pagi'] = False
                     if stats[m]['owe_off'] > 0: stats[m]['owe_off'] -= 1
 
+        # Langkah 2: Aturan Safety (Fatigue, Post-Malam, & Penjaga Dompet Kuota)
         for m in unassigned[:]:
             last_s = stats[m]['last_shift']
             force_off, reason_off, just_added_owe = False, "", False
@@ -112,7 +124,7 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                 stats[m]['restrict_pagi'] = (reason_off == "Post-Malam")
                 unassigned.remove(m)
 
-        # Tim Spesial: Hanya Pagi / Sore
+        # Langkah 3: Tim Spesial (Felix, Adi, Alfyn) -> Hanya Pagi / Sore
         for m in unassigned[:]:
             if m in special_team:
                 last_s = stats[m]['last_shift']
@@ -130,7 +142,7 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                 stats[m]['restrict_pagi'] = False
                 unassigned.remove(m)
 
-        # Tim Reguler untuk Malam
+        # Langkah 4: Tim Reguler untuk Malam (Rotasi Rata)
         eligible_malam = [m for m in unassigned if m not in special_team]
         
         def get_malam_score(emp):
@@ -149,6 +161,7 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
             stats[m]['consecutive_work'] += 1
             unassigned.remove(m)
 
+        # Langkah 5: Penguncian Tanggal Khusus
         req_pagi_sore = 3 if day_num in [10, 11, 12, 25, 26, 27] else 0
         if req_pagi_sore > 0:
             for s_type in ['Pagi', 'Sore']:
@@ -163,19 +176,14 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                         stats[m]['consecutive_work'] += 1
                         unassigned.remove(m)
 
-        if today_offs < max_off_daily:
+        # --- OPTIMASI BARU: PEMERATAAN LIBUR AKTIF (Pemberian Libur Berkala) ---
+        if today_offs < ideal_offs_today:
             eligible_for_off = [m for m in unassigned if stats[m]['off_count'] < target_off]
             
-            def get_off_score(emp):
-                ls = stats[emp]['last_shift']
-                if ls == 'Sore': return 1
-                if ls == 'Pagi': return 2
-                if ls is None: return 3
-                return 4
-
-            eligible_for_off.sort(key=lambda emp: (-stats[emp]['consecutive_work'], get_off_score(emp)))
+            # FITUR UTAMA: Urutkan berdasarkan total hari kerja tertinggi saat ini agar kurva kerja mendatar (Sama Rata)
+            eligible_for_off.sort(key=lambda emp: (stats[emp]['work_count'], stats[emp]['consecutive_work']), reverse=True)
             for m in eligible_for_off:
-                if today_offs >= max_off_daily: break
+                if today_offs >= ideal_offs_today: break
                 stats[m]['shifts'].append('Off')
                 stats[m]['last_shift'] = 'Off'
                 stats[m]['off_count'] += 1
@@ -183,23 +191,25 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                 today_offs += 1
                 unassigned.remove(m)
 
+        # Langkah 7: Distribusi Sisa Karyawan ke Pagi / Sore
         unassigned_reguler = [m for m in unassigned]
         if unassigned_reguler:
             target_pagi = math.ceil(len(unassigned_reguler) / 2)
             
             def get_pagi_priority(emp):
                 ls = stats[emp]['last_shift']
-                if stats[emp]['restrict_pagi'] or ls == 'Sore': return 99
-                if ls == 'Off': return 1
-                if ls is None: return 2
-                if ls == 'Pagi': return 3
-                return 4
+                if stats[emp]['restrict_pagi'] or ls == 'Sore': return (99, stats[emp]['work_count'])
+                if ls == 'Off': return (1, stats[emp]['work_count'])
+                if ls is None: return (2, stats[emp]['work_count'])
+                if ls == 'Pagi': return (3, stats[emp]['work_count'])
+                return (4, stats[emp]['work_count'])
 
             unassigned_reguler.sort(key=get_pagi_priority)
             assigned_pagi_count = 0
             for m in unassigned_reguler: stats[m]['temp_choice'] = 'Sore'
             for m in unassigned_reguler:
                 if assigned_pagi_count < target_pagi and not stats[m]['restrict_pagi'] and stats[m]['last_shift'] != 'Sore':
+                    st.session_state.pagi_count = assigned_pagi_count
                     stats[m]['temp_choice'] = 'Pagi'
                     assigned_pagi_count += 1
             if assigned_pagi_count == 0 and len(unassigned_reguler) > 0:
@@ -217,6 +227,7 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
 
     schedule = {m: stats[m]['shifts'] for m in members}
     return pd.DataFrame(schedule, index=[f"Day {i + 1}" for i in range(num_days)]).T
+
 
 def generate_overtime_recommendations(schedule_df, days_count):
     day_columns = [f"Day {i + 1}" for i in range(days_count)]
@@ -237,6 +248,7 @@ def generate_overtime_recommendations(schedule_df, days_count):
             ot_df.at[member, col] = rek
     return ot_df
 
+
 def categorize_date(day):
     if 1 <= day <= 5:
         return "Tgl 1-5"
@@ -251,6 +263,7 @@ def categorize_date(day):
     else:
         return "Tgl 26-31"
 
+
 def color_coding(val):
     if val == 'Off': return 'background-color: #e0e0e0; color: black'
     if val == 'Malam': return 'background-color: #2c3e50; color: white'
@@ -262,6 +275,7 @@ def color_coding(val):
     if val == 'Middle': return 'background-color : #3498db; color: white'
     if isinstance(val, (int, float)): return 'font-weight: bold; background-color: #f8f9fa; color: black; border-left: 1px solid #ccc'
     return ''
+
 
 # ==========================================
 # 1. PROGRAM JADWAL SHIFT
@@ -344,12 +358,10 @@ def aplikasi_jadwal_shift():
 
             st.subheader("📅 Jadwal Utama")
             
-            # --- BLOK ANTI-ERROR PEWARNAAN TABEL STREAMLIT CLOUD ---
             try:
                 st.dataframe(df.style.map(color_coding), use_container_width=True)
             except AttributeError:
                 st.dataframe(df.style.applymap(color_coding), use_container_width=True)
-            # -------------------------------------------------------
 
             st.subheader("💡 Rekomendasi Lembur (Overtime)")
             st.dataframe(df_lembur, use_container_width=True)
@@ -357,33 +369,26 @@ def aplikasi_jadwal_shift():
             # --- EKSPOR FILE EXCEL BERWARNA ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # 1. Terapkan warna ke data (Deteksi versi Pandas otomatis)
                 if hasattr(df.style, 'map'):
                     styled_df = df.style.map(color_coding)
                 else:
                     styled_df = df.style.applymap(color_coding)
                 
-                # 2. Cetak Jadwal Utama ke Sheet 1
                 styled_df.to_excel(writer, index=True, sheet_name='Summary_Schedule')
-                
-                # 3. Cetak data Lembur ke Sheet 2
                 df_lembur.to_excel(writer, index=True, sheet_name='Rekomendasi_Lembur')
 
-                # 4. Fitur Auto-Width: Melebarkan kolom Sheet 1 otomatis
                 worksheet1 = writer.sheets['Summary_Schedule']
                 for column_cells in worksheet1.columns:
                     length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
                     worksheet1.column_dimensions[column_cells[0].column_letter].width = length + 3
 
-                # 5. Fitur Auto-Width: Melebarkan kolom Sheet 2 otomatis
                 worksheet2 = writer.sheets['Rekomendasi_Lembur']
                 for column_cells in worksheet2.columns:
                     length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
                     worksheet2.column_dimensions[column_cells[0].column_letter].width = length + 3
 
-            output.seek(0) # Mengunci file di memori
+            output.seek(0)
 
-            # 6. Tombol Download Excel Asli
             st.download_button(
                 label="⬇️ Download Excel (Jadwal & Lembur)",
                 data=output,
@@ -560,6 +565,7 @@ def aplikasi_analisis_atm():
             else:
                 st.warning("Belum ada data masalah ATM yang tercatat.")
 
+
 # ==========================================
 # 3. MENU NAVIGASI UTAMA (SIDEBAR)
 # ==========================================
@@ -579,6 +585,7 @@ def main():
         aplikasi_jadwal_shift()
     elif pilihan_menu == "🏦 Analisis ATM":
         aplikasi_analisis_atm()
+
 
 if __name__ == "__main__":
     main()
