@@ -58,10 +58,8 @@ def parse_requests_flexible(request_text):
     return requests
 
 
-# (Fungsi Logika Utama Shift disembunyikan di sini agar rapi)
 def generate_schedule_balanced(members, num_days, requests, target_work, target_off, max_off_daily, max_consec_work,
                                initial_state):
-    # Logika Shift tetap sama seperti milik Anda
     special_team = ["Felix", "Adi", "Alfyn"]
     stats = {m: {'shifts': [], 'work_count': 0, 'off_count': 0, 'cuti_count': 0, 'consecutive_work': initial_state[m][
         'consecutive_work'] if initial_state and m in initial_state else 0, 'malam_count': 0,
@@ -111,16 +109,26 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
                 stats[m]['restrict_pagi'] = (reason_off == "Post-Malam")
                 unassigned.remove(m)
 
+        # --- PERUBAHAN: TIM SPESIAL HANYA PAGI / SORE ---
         for m in unassigned[:]:
             if m in special_team:
-                chosen = 'Siang' if stats[m]['last_shift'] in ['Middle', 'Siang'] else random.choice(
-                    ['Siang', 'Middle'])
+                last_s = stats[m]['last_shift']
+                # Logika Flow: Habis Sore dilarang Pagi
+                if stats[m]['restrict_pagi'] or last_s == 'Sore':
+                    chosen = 'Sore'
+                elif last_s == 'Pagi':
+                    chosen = 'Sore' # Flow natural Pagi ke Sore
+                else: # Jika kemarin Off atau hari pertama
+                    chosen = 'Pagi'
+                
                 stats[m]['shifts'].append(chosen)
                 stats[m]['last_shift'] = chosen
                 stats[m]['work_count'] += 1
                 stats[m]['consecutive_work'] += 1
+                stats[m]['restrict_pagi'] = False
                 unassigned.remove(m)
 
+        # Tim Reguler untuk Malam (Tim Spesial tetap dikecualikan dari Malam)
         eligible_malam = [m for m in unassigned if m not in special_team]
         eligible_malam.sort(key=lambda emp: (stats[emp]['malam_count'],
                                              1 if stats[emp]['last_shift'] == 'Sore' else 2 if stats[emp][
@@ -238,8 +246,7 @@ def color_coding(val):
     if val == 'Sore': return 'background-color: #27ae60; color: white'
     if val == 'Siang': return 'background-color : #FFD95F; color: black'
     if val == 'Middle': return 'background-color : #3498db; color: white'
-    if isinstance(val, (int,
-                        float)): return 'font-weight: bold; background-color: #f8f9fa; color: black; border-left: 1px solid #ccc'
+    if isinstance(val, (int, float)): return 'font-weight: bold; background-color: #f8f9fa; color: black; border-left: 1px solid #ccc'
     return ''
 
 
