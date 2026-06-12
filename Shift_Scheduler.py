@@ -8,10 +8,15 @@ import plotly.express as px
 # === 0. KONFIGURASI HALAMAN UTAMA (HARUS PALING ATAS) ===
 st.set_page_config(page_title="omnira-atmi", layout="wide")
 
+# ==========================================
+# FUNGSI PEMBANTU VERSI (VERSION-SAFE HELPERS)
+# ==========================================
+def pemicu_rerun():
+    if hasattr(st, 'rerun'):
+        st.rerun()
+    else:
+        st.experimental_rerun()
 
-# ==========================================
-# FUNGSI PEMBANTU (HELPER FUNCTIONS)
-# ==========================================
 def get_carry_over_state(file_upload, members):
     if file_upload is None: return None
     try:
@@ -38,7 +43,6 @@ def get_carry_over_state(file_upload, members):
         st.error(f"Gagal membaca file riwayat: {e}")
         return None
 
-
 def parse_requests_flexible(request_text):
     requests = {}
     if not request_text.strip(): return requests
@@ -56,7 +60,6 @@ def parse_requests_flexible(request_text):
         except:
             continue
     return requests
-
 
 def generate_schedule_balanced(members, num_days, requests, target_work, target_off, max_off_daily, max_consec_work, initial_state):
     special_team = ["Felix", "Adi", "Alfyn"]
@@ -130,7 +133,6 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
         # Tim Reguler untuk Malam
         eligible_malam = [m for m in unassigned if m not in special_team]
         
-        # Sistem skor pembantu agar lambda sort tidak error/panjang
         def get_malam_score(emp):
             ls = stats[emp]['last_shift']
             if ls == 'Sore': return 1
@@ -216,7 +218,6 @@ def generate_schedule_balanced(members, num_days, requests, target_work, target_
     schedule = {m: stats[m]['shifts'] for m in members}
     return pd.DataFrame(schedule, index=[f"Day {i + 1}" for i in range(num_days)]).T
 
-
 def generate_overtime_recommendations(schedule_df, days_count):
     day_columns = [f"Day {i + 1}" for i in range(days_count)]
     ot_df = pd.DataFrame("", index=schedule_df.index, columns=day_columns)
@@ -236,7 +237,6 @@ def generate_overtime_recommendations(schedule_df, days_count):
             ot_df.at[member, col] = rek
     return ot_df
 
-
 def categorize_date(day):
     if 1 <= day <= 5:
         return "Tgl 1-5"
@@ -251,7 +251,6 @@ def categorize_date(day):
     else:
         return "Tgl 26-31"
 
-
 def color_coding(val):
     if val == 'Off': return 'background-color: #e0e0e0; color: black'
     if val == 'Malam': return 'background-color: #2c3e50; color: white'
@@ -264,17 +263,14 @@ def color_coding(val):
     if isinstance(val, (int, float)): return 'font-weight: bold; background-color: #f8f9fa; color: black; border-left: 1px solid #ccc'
     return ''
 
-
 # ==========================================
 # 1. PROGRAM JADWAL SHIFT
 # ==========================================
 def aplikasi_jadwal_shift():
     st.title("🗓️ HD ATMi Shifting Scheduler Ultimate")
-
     st.write("Silakan lengkapi form di bawah ini untuk membuat jadwal shift bulan ini.")
-
+    
     col1, col2 = st.columns(2)
-
     with col1:
         st.header("1. Upload Riwayat Bulan Lalu")
         uploaded_file = st.file_uploader("Upload Excel (.xlsx)", type=['xlsx'])
@@ -289,7 +285,6 @@ def aplikasi_jadwal_shift():
         team_input = st.text_area("Team Members", default_team, height=150)
 
     st.divider()
-
     st.header("⚙️ Konfigurasi Aturan")
     col3, col4, col5 = st.columns(3)
     with col3:
@@ -303,13 +298,11 @@ def aplikasi_jadwal_shift():
     target_work_days = num_days - target_off_days
     team_members = [name.strip() for name in team_input.strip().splitlines() if name.strip()]
 
-    # Eksekusi Jadwal
     if st.button("🚀 Generate Schedule", use_container_width=True, type="primary"):
         user_requests = parse_requests_flexible(request_input)
         initial_state = get_carry_over_state(uploaded_file, team_members)
 
         with st.spinner("Menganalisis Algoritma Kelelahan Karyawan & Saldo Libur..."):
-            # FIX FINAL: Menggunakan urutan Positional Arguments murni yang 100% presisi
             df = generate_schedule_balanced(
                 team_members, 
                 num_days, 
@@ -335,7 +328,6 @@ def aplikasi_jadwal_shift():
             else:
                 st.success(f"✅ Aman! Tidak ada hari yang kekurangan personel jaga.")
 
-            # Summary Kerja & Libur
             df['Pagi'] = (df == 'Pagi').sum(axis=1)
             df['Siang'] = (df == 'Siang').sum(axis=1)
             df['Sore'] = (df == 'Sore').sum(axis=1)
@@ -351,19 +343,23 @@ def aplikasi_jadwal_shift():
             df_lembur = generate_overtime_recommendations(df, num_days)
 
             st.subheader("📅 Jadwal Utama")
-            st.dataframe(df.style.applymap(color_coding), use_container_width=True)
+            
+            # --- BLOK ANTI-ERROR PEWARNAAN TABEL STREAMLIT CLOUD ---
+            try:
+                st.dataframe(df.style.map(color_coding), use_container_width=True)
+            except AttributeError:
+                st.dataframe(df.style.applymap(color_coding), use_container_width=True)
+            # -------------------------------------------------------
 
             st.subheader("💡 Rekomendasi Lembur (Overtime)")
             st.dataframe(df_lembur, use_container_width=True)
 
-            # Ekspor File Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=True, sheet_name='Summary_Schedule')
                 df_lembur.to_excel(writer, index=True, sheet_name='Rekomendasi_Lembur')
 
             st.download_button("⬇️ Download Excel (Jadwal & Lembur)", output.getvalue(), 'jadwal_ultimate_rebuild.xlsx')
-
 
 # ==========================================
 # 2. PROGRAM ANALISIS DATA ATM (OMNIRA-ATMI)
@@ -391,12 +387,12 @@ def aplikasi_analisis_atm():
                 all_data.append(df_upload)
 
             st.session_state.df_atm = pd.concat(all_data, ignore_index=True)
-            st.rerun()
+            pemicu_rerun() 
 
     else:
         if st.button("🔄 Upload Data Baru"):
             st.session_state.df_atm = None
-            st.rerun()
+            pemicu_rerun() 
 
         st.divider()
         df = st.session_state.df_atm.copy()
@@ -534,7 +530,6 @@ def aplikasi_analisis_atm():
             else:
                 st.warning("Belum ada data masalah ATM yang tercatat.")
 
-
 # ==========================================
 # 3. MENU NAVIGASI UTAMA (SIDEBAR)
 # ==========================================
@@ -554,7 +549,6 @@ def main():
         aplikasi_jadwal_shift()
     elif pilihan_menu == "🏦 Analisis ATM":
         aplikasi_analisis_atm()
-
 
 if __name__ == "__main__":
     main()
