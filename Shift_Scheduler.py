@@ -354,12 +354,19 @@ def aplikasi_jadwal_shift():
             st.subheader("💡 Rekomendasi Lembur (Overtime)")
             st.dataframe(df_lembur, use_container_width=True)
 
+            # Ekspor File Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=True, sheet_name='Summary_Schedule')
                 df_lembur.to_excel(writer, index=True, sheet_name='Rekomendasi_Lembur')
 
-            st.download_button("⬇️ Download Excel (Jadwal & Lembur)", output.getvalue(), 'jadwal_ultimate_rebuild.xlsx')
+            # FIX: Menambahkan parameter MIME agar browser tidak salah format
+            st.download_button(
+                label="⬇️ Download Excel (Jadwal & Lembur)",
+                data=output.getvalue(),
+                file_name="jadwal_ultimate_rebuild.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 # ==========================================
 # 2. PROGRAM ANALISIS DATA ATM (OMNIRA-ATMI)
