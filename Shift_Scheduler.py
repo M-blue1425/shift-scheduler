@@ -354,16 +354,39 @@ def aplikasi_jadwal_shift():
             st.subheader("💡 Rekomendasi Lembur (Overtime)")
             st.dataframe(df_lembur, use_container_width=True)
 
-            # Ekspor File Excel
+            # --- EKSPOR FILE EXCEL BERWARNA ---
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=True, sheet_name='Summary_Schedule')
+                # 1. Terapkan warna ke data (Deteksi versi Pandas otomatis)
+                if hasattr(df.style, 'map'):
+                    styled_df = df.style.map(color_coding)
+                else:
+                    styled_df = df.style.applymap(color_coding)
+                
+                # 2. Cetak Jadwal Utama ke Sheet 1
+                styled_df.to_excel(writer, index=True, sheet_name='Summary_Schedule')
+                
+                # 3. Cetak data Lembur ke Sheet 2
                 df_lembur.to_excel(writer, index=True, sheet_name='Rekomendasi_Lembur')
 
-            # FIX: Menambahkan parameter MIME agar browser tidak salah format
+                # 4. Fitur Auto-Width: Melebarkan kolom Sheet 1 otomatis
+                worksheet1 = writer.sheets['Summary_Schedule']
+                for column_cells in worksheet1.columns:
+                    length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
+                    worksheet1.column_dimensions[column_cells[0].column_letter].width = length + 3
+
+                # 5. Fitur Auto-Width: Melebarkan kolom Sheet 2 otomatis
+                worksheet2 = writer.sheets['Rekomendasi_Lembur']
+                for column_cells in worksheet2.columns:
+                    length = max(len(str(cell.value)) if cell.value else 0 for cell in column_cells)
+                    worksheet2.column_dimensions[column_cells[0].column_letter].width = length + 3
+
+            output.seek(0) # Mengunci file di memori
+
+            # 6. Tombol Download Excel Asli
             st.download_button(
                 label="⬇️ Download Excel (Jadwal & Lembur)",
-                data=output.getvalue(),
+                data=output,
                 file_name="jadwal_ultimate_rebuild.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
