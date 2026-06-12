@@ -295,8 +295,17 @@ def aplikasi_jadwal_shift():
         initial_state = get_carry_over_state(uploaded_file, team_members)
 
         with st.spinner("Menganalisis Algoritma Kelelahan Karyawan & Saldo Libur..."):
-            df = generate_schedule_balanced(team_members, num_days, user_requests, target_work_days, target_off_days,
-                                            max_off_per_day, max_consecutive_work, initial_state)
+            # FIX: Menyinkronkan 8 argumen sesuai urutan definisi fungsi asli
+            df = generate_schedule_balanced(
+                members=team_members, 
+                num_days=num_days, 
+                requests=user_requests, 
+                target_work=target_work_days, 
+                target_off=target_off_days, 
+                max_off_daily=max_off_per_day, 
+                max_consec_work=max_consecutive_work, 
+                initial_state=initial_state
+            )
 
             st.divider()
             st.write("### 🚨 Laporan Operasional Harian")
